@@ -4,15 +4,22 @@ import "./App.css";
 function App() {
   const [mensaje, setMensaje] = useState("Cargando...");
 
-  // ?? aquí ponemos DIRECTO la URL de Railway
+  // URL pública del backend en Railway
   const apiUrl = "https://proyecto-fullstack-production.up.railway.app";
 
   useEffect(() => {
     fetch(`${apiUrl}/api`)
-      .then((res) => res.json())
-      .then((data) => setMensaje(data.message))
+      .then(async (res) => {
+        const text = await res.text();
+        try {
+          const data = JSON.parse(text);
+          setMensaje(data.message);
+        } catch {
+          setMensaje("Backend respondió texto: " + text);
+        }
+      })
       .catch((err) => {
-        setMensaje(`Error al conectar con la API: ${err.message}`);
+        setMensaje("Error al conectar con la API: " + err.message);
       });
   }, [apiUrl]);
 
