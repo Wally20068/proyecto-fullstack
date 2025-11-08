@@ -1,187 +1,238 @@
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import "./App.css";
 
-// usa la variable de entorno si existe, si no, usa localhost
-const API_BASE = import.meta.env.VITE_API_URL || "http://localhost:3000";
-
 function App() {
-  const [mensajeApi, setMensajeApi] = useState("Cargando mensaje...");
+  // URL de la API (de Vercel usará el .env de Vercel, en local tu .env)
+  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:3000";
+
   const [estudiantes, setEstudiantes] = useState([]);
   const [nombre, setNombre] = useState("");
   const [correo, setCorreo] = useState("");
-  const [cargando, setCargando] = useState(false);
+  const [busqueda, setBusqueda] = useState("");
+  const [cargando, setCargando] = useState(true);
   const [error, setError] = useState("");
+  const [mensajeOk, setMensajeOk] = useState("");
+  const [apiOK, setApiOK] = useState(false);
 
-  // 1. traer el /api (solo para mostrar que conecta)
+  // cargar lista inicial
   useEffect(() => {
-    fetch(`${API_BASE}/api`)
-      .then((res) => res.json())
-      .then((data) => setMensajeApi(data.message))
-      .catch(() => setMensajeApi("No se pudo conectar con /api"));
-  }, []);
+    const cargar = async () => {
+      setCargando(true);
+      setError("");
+      try {
+        // 1. comprobar que la API responde
+        const ping = await fetch(`${apiBase}/api`);
+        if (!ping.ok) throw new Error("No se pudo conectar con la API");
+        setApiOK(true);
 
-  // 2. traer la lista de estudiantes
-  const cargarEstudiantes = () => {
-    fetch(`${API_BASE}/api/estudiantes`)
-      .then((res) => res.json())
-      .then((data) => {
-        setEstudiantes(data);
-        setError("");
-      })
-      .catch((err) => {
-        console.error(err);
-        setError("No se pudo cargar la lista");
-      });
-  };
+        // 2. pedir estudiantes
+        const res = await fetch(`${apiBase}/api/estudiantes`);
+        if (!res.ok) throw new Error("No se pudo cargar la lista");
+        const data = await res.json();
+        setEstudiantes(Array.isArray(data) ? data : []);
+      } catch (err) {
+        setError(err.message);
+        setApiOK(false);
+      } finally {
+        setCargando(false);
+      }
+    };
+    cargar();
+  }, [apiBase]);
 
-  useEffect(() => {
-    cargarEstudiantes();
-  }, []);
+  // lista filtrada
+  const listaFiltrada = useMemo(() => {
+    if (!busqueda.trim()) return estudiantes;
+    const term = busqueda.toLowerCase();
+    return estudiantes.filter(
+      (e) =>
+        e.nombre?.toLowerCase().includes(term) ||
+        e.correo?.toLowerCase().includes(term)
+    );
+  }, [busqueda, estudiantes]);
 
-  // 3. crear estudiante
-  const manejarSubmit = (e) => {
+  // crear estudiante
+  const crearEstudiante = async (e) => {
     e.preventDefault();
-    if (!nombre.trim()) return;
+    setError("");
+    setMensajeOk("");
 
-    setCargando(true);
-    fetch(`${API_BASE}/api/estudiantes`, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-      },
-      body: JSON.stringify({ nombre, correo }),
-    })
-      .then((res) => res.json())
-      .then(() => {
-        setNombre("");
-        setCorreo("");
-        cargarEstudiantes();
-      })
-      .catch(() => {
-        setError("No se pudo crear el estudiante");
-      })
-      .finally(() => setCargando(false));
+    if (!nombre.trim()) {
+      setError("El nombre es obligatorio");
+      return;
+    }
+
+    try {
+      const res = await fetch(`${apiBase}/api/estudiantes`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          nombre: nombre.trim(),
+          correo: correo.trim(),
+        }),
+      });
+
+      if (!res.ok) {
+        const txt = await res.text();
+        throw new Error(txt || "No se pudo crear el estudiante");
+      }
+
+      const nuevo = await res.json(); // el backend devuelve {ok:true, estudiante:{...}} o el obj directo
+      // según tu backend de ejemplo (el que hicimos en VSCode) el POST devolvía { ok: true, estudiante }
+      const est = nuevo.estudiante || nuevo;
+
+      setEstudiantes((prev) => [...prev, est]);
+      setNombre("");
+      setCorreo("");
+      setMensajeOk("Estudiante guardado ?");
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
-  // 4. borrar
-  const borrarEstudiante = (id) => {
-    fetch(`${API_BASE}/api/estudiantes/${id}`, {
-      method: "DELETE",
-    })
-      .then(() => cargarEstudiantes())
-      .catch(() => setError("No se pudo borrar"));
+  // eliminar
+  const eliminarEstudiante = async (id) => {
+    const confirmar = window.confirm("¿Eliminar este estudiante?");
+    if (!confirmar) return;
+
+    try {
+      const res = await fetch(`${apiBase}/api/estudiantes/${id}`, {
+        method: "DELETE",
+      });
+      if (!res.ok) throw new Error("No se pudo eliminar");
+      setEstudiantes((prev) => prev.filter((e) => e.id !== id));
+    } catch (err) {
+      setError(err.message);
+    }
   };
 
   return (
-    <div style={{ maxWidth: "900px", margin: "0 auto", padding: "2rem", color: "white" }}>
-      <h1 style={{ fontSize: "2.5rem", marginBottom: "1rem" }}>Frontend React âœ…</h1>
+    <div className="app">
+      {/* Barra superior */}
+      <header className="topbar">
+        <div className="brand">Proyecto Fullstack</div>
+        <div className="api-url">
+          API: <span>{apiBase}</span>
+        </div>
+      </header>
 
-      <p style={{ marginBottom: "1rem" }}>
-        Respuesta del backend (/api): <strong>{mensajeApi}</strong>
-      </p>
-      <p style={{ fontSize: "0.8rem", opacity: 0.7, marginBottom: "2rem" }}>
-        URL usada: {API_BASE}/api
-      </p>
+      {/* Alertas */}
+      <div className="container">
+        {error && <div className="alert alert-error">{error}</div>}
+        {mensajeOk && <div className="alert alert-success">{mensajeOk}</div>}
 
-      <section
-        style={{
-          background: "#1f2937",
-          padding: "1.5rem",
-          borderRadius: "1rem",
-          marginBottom: "2rem",
-        }}
-      >
-        <h2 style={{ marginBottom: "1rem" }}>Nuevo estudiante</h2>
-        <form onSubmit={manejarSubmit} style={{ display: "flex", gap: "1rem", flexWrap: "wrap" }}>
-          <input
-            type="text"
-            placeholder="Nombre"
-            value={nombre}
-            onChange={(e) => setNombre(e.target.value)}
-            style={{ padding: "0.5rem", flex: "1 1 200px" }}
-          />
-          <input
-            type="email"
-            placeholder="Correo (opcional)"
-            value={correo}
-            onChange={(e) => setCorreo(e.target.value)}
-            style={{ padding: "0.5rem", flex: "1 1 200px" }}
-          />
-          <button
-            type="submit"
-            disabled={cargando}
-            style={{
-              background: "#10b981",
-              border: "none",
-              padding: "0.5rem 1rem",
-              cursor: "pointer",
-              borderRadius: "0.5rem",
-            }}
-          >
-            {cargando ? "Guardando..." : "Guardar"}
-          </button>
-        </form>
-        {error && <p style={{ color: "salmon", marginTop: "1rem" }}>{error}</p>}
-      </section>
+        {/* Encabezado */}
+        <div className="header-title">
+          <h1>
+            Frontend React <span className="badge">?</span>
+          </h1>
+          <p>
+            Respuesta del backend (/api):{" "}
+            <strong>
+              {apiOK ? "API de Estudiantes funcionando ?" : "No conectado"}
+            </strong>
+          </p>
+          <p className="small">URL usada: {apiBase}/api</p>
+        </div>
 
-      <section>
-        <h2 style={{ marginBottom: "1rem" }}>Listado de estudiantes</h2>
-        <table
-          style={{
-            width: "100%",
-            borderCollapse: "collapse",
-            background: "#111827",
-          }}
-        >
-          <thead>
-            <tr>
-              <th style={{ borderBottom: "1px solid #374151", textAlign: "left", padding: "0.5rem" }}>
-                ID
-              </th>
-              <th style={{ borderBottom: "1px solid #374151", textAlign: "left", padding: "0.5rem" }}>
-                Nombre
-              </th>
-              <th style={{ borderBottom: "1px solid #374151", textAlign: "left", padding: "0.5rem" }}>
-                Correo
-              </th>
-              <th style={{ borderBottom: "1px solid #374151", textAlign: "left", padding: "0.5rem" }}>
-                Acciones
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {estudiantes.length === 0 ? (
-              <tr>
-                <td colSpan={4} style={{ padding: "1rem" }}>
-                  No hay estudiantes
-                </td>
-              </tr>
-            ) : (
-              estudiantes.map((est) => (
-                <tr key={est.id}>
-                  <td style={{ padding: "0.5rem" }}>{est.id}</td>
-                  <td style={{ padding: "0.5rem" }}>{est.nombre}</td>
-                  <td style={{ padding: "0.5rem" }}>{est.correo}</td>
-                  <td style={{ padding: "0.5rem" }}>
-                    <button
-                      onClick={() => borrarEstudiante(est.id)}
-                      style={{
-                        background: "#ef4444",
-                        border: "none",
-                        padding: "0.3rem 0.7rem",
-                        borderRadius: "0.3rem",
-                        cursor: "pointer",
-                      }}
-                    >
-                      Borrar
-                    </button>
-                  </td>
-                </tr>
-              ))
-            )}
-          </tbody>
-        </table>
-      </section>
+        {/* Cards de resumen */}
+        <div className="cards">
+          <div className="card">
+            <p>Total estudiantes</p>
+            <h2>{estudiantes.length}</h2>
+          </div>
+          <div className="card">
+            <p>Mostrando</p>
+            <h2>{listaFiltrada.length}</h2>
+          </div>
+          <div className="card">
+            <p>Estado API</p>
+            <span className={apiOK ? "chip chip-ok" : "chip chip-bad"}>
+              {apiOK ? "Conectado" : "Desconectado"}
+            </span>
+          </div>
+        </div>
+
+        {/* Grid principal */}
+        <div className="grid">
+          {/* Formulario */}
+          <div className="panel form-panel">
+            <h2>Nuevo estudiante</h2>
+            <p className="desc">Agrega un alumno y se guardará en Railway.</p>
+            <form onSubmit={crearEstudiante}>
+              <label>
+                Nombre *
+                <input
+                  value={nombre}
+                  onChange={(e) => setNombre(e.target.value)}
+                  placeholder="Ej. Adrián Bravo"
+                />
+              </label>
+              <label>
+                Correo (opcional)
+                <input
+                  value={correo}
+                  onChange={(e) => setCorreo(e.target.value)}
+                  placeholder="Ej. adrian@correo.com"
+                />
+              </label>
+              <button type="submit" disabled={cargando}>
+                {cargando ? "Cargando..." : "Guardar"}
+              </button>
+            </form>
+          </div>
+
+          {/* Tabla */}
+          <div className="panel table-panel">
+            <div className="table-header">
+              <h2>Listado de estudiantes</h2>
+              <input
+                value={busqueda}
+                onChange={(e) => setBusqueda(e.target.value)}
+                placeholder="Buscar por nombre o correo..."
+              />
+            </div>
+
+            <div className="table-wrapper">
+              {cargando ? (
+                <p className="muted">Cargando...</p>
+              ) : listaFiltrada.length === 0 ? (
+                <p className="muted">
+                  No hay estudiantes o no coincide la búsqueda.
+                </p>
+              ) : (
+                <table>
+                  <thead>
+                    <tr>
+                      <th>ID</th>
+                      <th>Nombre</th>
+                      <th>Correo</th>
+                      <th>Acciones</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {listaFiltrada.map((est) => (
+                      <tr key={est.id}>
+                        <td>{est.id}</td>
+                        <td>{est.nombre}</td>
+                        <td>{est.correo || "—"}</td>
+                        <td>
+                          <button
+                            className="btn-delete"
+                            onClick={() => eliminarEstudiante(est.id)}
+                          >
+                            Eliminar
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              )}
+            </div>
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
