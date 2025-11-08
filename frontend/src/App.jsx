@@ -1,238 +1,222 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useState } from "react";
 import "./App.css";
 
-function App() {
-  // URL de la API (de Vercel usará el .env de Vercel, en local tu .env)
-  const apiBase = import.meta.env.VITE_API_URL || "http://localhost:3000";
+const apiUrl = import.meta.env.VITE_API_URL || "http://localhost:3000";
 
+function App() {
+  const [mensajeApi, setMensajeApi] = useState("");
+  const [estadoApi, setEstadoApi] = useState("?");
   const [estudiantes, setEstudiantes] = useState([]);
+  const [filtrados, setFiltrados] = useState([]);
   const [nombre, setNombre] = useState("");
   const [correo, setCorreo] = useState("");
+  const [alerta, setAlerta] = useState({ tipo: "", texto: "" });
   const [busqueda, setBusqueda] = useState("");
-  const [cargando, setCargando] = useState(true);
-  const [error, setError] = useState("");
-  const [mensajeOk, setMensajeOk] = useState("");
-  const [apiOK, setApiOK] = useState(false);
 
-  // cargar lista inicial
+  // comprobar que la API responde
   useEffect(() => {
-    const cargar = async () => {
-      setCargando(true);
-      setError("");
-      try {
-        // 1. comprobar que la API responde
-        const ping = await fetch(`${apiBase}/api`);
-        if (!ping.ok) throw new Error("No se pudo conectar con la API");
-        setApiOK(true);
+    fetch(`${apiUrl}/api`)
+      .then((res) => res.json())
+      .then((data) => {
+        setMensajeApi(data.message || "API ok");
+        setEstadoApi("Conectado");
+      })
+      .catch(() => {
+        setMensajeApi("No se pudo conectar con la API");
+        setEstadoApi("Desconectado");
+      });
+  }, []);
 
-        // 2. pedir estudiantes
-        const res = await fetch(`${apiBase}/api/estudiantes`);
-        if (!res.ok) throw new Error("No se pudo cargar la lista");
-        const data = await res.json();
-        setEstudiantes(Array.isArray(data) ? data : []);
-      } catch (err) {
-        setError(err.message);
-        setApiOK(false);
-      } finally {
-        setCargando(false);
-      }
-    };
-    cargar();
-  }, [apiBase]);
+  const cargarEstudiantes = () => {
+    fetch(`${apiUrl}/api/estudiantes`)
+      .then((res) => res.json())
+      .then((data) => {
+        setEstudiantes(data);
+        setFiltrados(data);
+        setAlerta({ tipo: "", texto: "" });
+      })
+      .catch(() => {
+        setAlerta({
+          tipo: "error",
+          texto: "No se pudo cargar la lista de estudiantes",
+        });
+      });
+  };
 
-  // lista filtrada
-  const listaFiltrada = useMemo(() => {
-    if (!busqueda.trim()) return estudiantes;
-    const term = busqueda.toLowerCase();
-    return estudiantes.filter(
-      (e) =>
-        e.nombre?.toLowerCase().includes(term) ||
-        e.correo?.toLowerCase().includes(term)
-    );
-  }, [busqueda, estudiantes]);
+  useEffect(() => {
+    cargarEstudiantes();
+  }, []);
 
-  // crear estudiante
-  const crearEstudiante = async (e) => {
+  const manejarGuardar = (e) => {
     e.preventDefault();
-    setError("");
-    setMensajeOk("");
-
     if (!nombre.trim()) {
-      setError("El nombre es obligatorio");
+      setAlerta({ tipo: "error", texto: "El nombre es obligatorio" });
       return;
     }
 
-    try {
-      const res = await fetch(`${apiBase}/api/estudiantes`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          nombre: nombre.trim(),
-          correo: correo.trim(),
-        }),
-      });
-
-      if (!res.ok) {
-        const txt = await res.text();
-        throw new Error(txt || "No se pudo crear el estudiante");
-      }
-
-      const nuevo = await res.json(); // el backend devuelve {ok:true, estudiante:{...}} o el obj directo
-      // según tu backend de ejemplo (el que hicimos en VSCode) el POST devolvía { ok: true, estudiante }
-      const est = nuevo.estudiante || nuevo;
-
-      setEstudiantes((prev) => [...prev, est]);
-      setNombre("");
-      setCorreo("");
-      setMensajeOk("Estudiante guardado ?");
-    } catch (err) {
-      setError(err.message);
-    }
+    fetch(`${apiUrl}/api/estudiantes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ nombre, correo }),
+    })
+      .then((res) => {
+        if (!res.ok) throw new Error("Error al crear");
+        return res.json();
+      })
+      .then(() => {
+        setAlerta({ tipo: "ok", texto: "Estudiante guardado" });
+        setNombre("");
+        setCorreo("");
+        cargarEstudiantes();
+      })
+      .catch(() =>
+        setAlerta({ tipo: "error", texto: "No se pudo crear el estudiante" })
+      );
   };
 
-  // eliminar
-  const eliminarEstudiante = async (id) => {
+  const manejarEliminar = (id) => {
     const confirmar = window.confirm("¿Eliminar este estudiante?");
     if (!confirmar) return;
 
-    try {
-      const res = await fetch(`${apiBase}/api/estudiantes/${id}`, {
-        method: "DELETE",
-      });
-      if (!res.ok) throw new Error("No se pudo eliminar");
-      setEstudiantes((prev) => prev.filter((e) => e.id !== id));
-    } catch (err) {
-      setError(err.message);
-    }
+    fetch(`${apiUrl}/api/estudiantes/${id}`, { method: "DELETE" })
+      .then((res) => {
+        if (!res.ok) throw new Error("Error al eliminar");
+        setAlerta({ tipo: "ok", texto: "Estudiante eliminado" });
+        cargarEstudiantes();
+      })
+      .catch(() =>
+        setAlerta({ tipo: "error", texto: "No se pudo eliminar" })
+      );
+  };
+
+  const manejarBusqueda = (valor) => {
+    setBusqueda(valor);
+    const texto = valor.toLowerCase();
+    const res = estudiantes.filter(
+      (e) =>
+        e.nombre.toLowerCase().includes(texto) ||
+        (e.correo || "").toLowerCase().includes(texto)
+    );
+    setFiltrados(res);
   };
 
   return (
     <div className="app">
-      {/* Barra superior */}
       <header className="topbar">
-        <div className="brand">Proyecto Fullstack</div>
-        <div className="api-url">
-          API: <span>{apiBase}</span>
-        </div>
+        <div className="logo">Proyecto Fullstack</div>
+        <div className="api-pill">API: {apiUrl}</div>
       </header>
 
-      {/* Alertas */}
-      <div className="container">
-        {error && <div className="alert alert-error">{error}</div>}
-        {mensajeOk && <div className="alert alert-success">{mensajeOk}</div>}
-
-        {/* Encabezado */}
-        <div className="header-title">
-          <h1>
-            Frontend React <span className="badge">?</span>
-          </h1>
-          <p>
-            Respuesta del backend (/api):{" "}
-            <strong>
-              {apiOK ? "API de Estudiantes funcionando ?" : "No conectado"}
-            </strong>
-          </p>
-          <p className="small">URL usada: {apiBase}/api</p>
+      <main className="contenido">
+        <div className="titulo-bloque">
+          <h1>Panel de estudiantes</h1>
+          <span className={estadoApi === "Conectado" ? "badge-ok" : "badge-bad"}>
+            {estadoApi}
+          </span>
         </div>
 
-        {/* Cards de resumen */}
-        <div className="cards">
-          <div className="card">
+        {alerta.texto && (
+          <div
+            className={
+              alerta.tipo === "ok" ? "alert alert-success" : "alert alert-error"
+            }
+          >
+            {alerta.texto}
+          </div>
+        )}
+
+        <section className="grid">
+          <div className="card metric">
             <p>Total estudiantes</p>
             <h2>{estudiantes.length}</h2>
           </div>
-          <div className="card">
+          <div className="card metric">
             <p>Mostrando</p>
-            <h2>{listaFiltrada.length}</h2>
+            <h2>{filtrados.length}</h2>
           </div>
-          <div className="card">
-            <p>Estado API</p>
-            <span className={apiOK ? "chip chip-ok" : "chip chip-bad"}>
-              {apiOK ? "Conectado" : "Desconectado"}
-            </span>
+          <div className="card metric">
+            <p>Mensaje API</p>
+            <h2 className="mensaje-api">{mensajeApi}</h2>
           </div>
-        </div>
+        </section>
 
-        {/* Grid principal */}
-        <div className="grid">
-          {/* Formulario */}
-          <div className="panel form-panel">
+        <section className="panel">
+          <div className="card form-card">
             <h2>Nuevo estudiante</h2>
-            <p className="desc">Agrega un alumno y se guardará en Railway.</p>
-            <form onSubmit={crearEstudiante}>
-              <label>
-                Nombre *
-                <input
-                  value={nombre}
-                  onChange={(e) => setNombre(e.target.value)}
-                  placeholder="Ej. Adrián Bravo"
-                />
-              </label>
-              <label>
-                Correo (opcional)
-                <input
-                  value={correo}
-                  onChange={(e) => setCorreo(e.target.value)}
-                  placeholder="Ej. adrian@correo.com"
-                />
-              </label>
-              <button type="submit" disabled={cargando}>
-                {cargando ? "Cargando..." : "Guardar"}
+            <p className="texto-ayuda">
+              Agrega un alumno y se guardará en el backend de Railway.
+            </p>
+            <form onSubmit={manejarGuardar}>
+              <label>Nombre *</label>
+              <input
+                value={nombre}
+                onChange={(e) => setNombre(e.target.value)}
+                placeholder="Ej. Adrián Bravo"
+              />
+
+              <label>Correo</label>
+              <input
+                value={correo}
+                onChange={(e) => setCorreo(e.target.value)}
+                placeholder="Ej. adrian@correo.com"
+              />
+
+              <button type="submit" className="btn-primario">
+                Guardar
               </button>
             </form>
           </div>
 
-          {/* Tabla */}
-          <div className="panel table-panel">
-            <div className="table-header">
+          <div className="card lista-card">
+            <div className="lista-header">
               <h2>Listado de estudiantes</h2>
               <input
                 value={busqueda}
-                onChange={(e) => setBusqueda(e.target.value)}
+                onChange={(e) => manejarBusqueda(e.target.value)}
                 placeholder="Buscar por nombre o correo..."
               />
             </div>
 
-            <div className="table-wrapper">
-              {cargando ? (
-                <p className="muted">Cargando...</p>
-              ) : listaFiltrada.length === 0 ? (
-                <p className="muted">
-                  No hay estudiantes o no coincide la búsqueda.
-                </p>
-              ) : (
-                <table>
-                  <thead>
+            <div className="tabla-wrapper">
+              <table>
+                <thead>
+                  <tr>
+                    <th>ID</th>
+                    <th>Nombre</th>
+                    <th>Correo</th>
+                    <th>Acciones</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {filtrados.length === 0 ? (
                     <tr>
-                      <th>ID</th>
-                      <th>Nombre</th>
-                      <th>Correo</th>
-                      <th>Acciones</th>
+                      <td colSpan={4} className="sin-datos">
+                        No hay estudiantes o no coincide la búsqueda.
+                      </td>
                     </tr>
-                  </thead>
-                  <tbody>
-                    {listaFiltrada.map((est) => (
-                      <tr key={est.id}>
-                        <td>{est.id}</td>
-                        <td>{est.nombre}</td>
-                        <td>{est.correo || "—"}</td>
+                  ) : (
+                    filtrados.map((e) => (
+                      <tr key={e.id}>
+                        <td>{e.id}</td>
+                        <td>{e.nombre}</td>
+                        <td>{e.correo || "-"}</td>
                         <td>
                           <button
-                            className="btn-delete"
-                            onClick={() => eliminarEstudiante(est.id)}
+                            onClick={() => manejarEliminar(e.id)}
+                            className="btn-borrar"
                           >
                             Eliminar
                           </button>
                         </td>
                       </tr>
-                    ))}
-                  </tbody>
-                </table>
-              )}
+                    ))
+                  )}
+                </tbody>
+              </table>
             </div>
           </div>
-        </div>
-      </div>
+        </section>
+      </main>
     </div>
   );
 }
